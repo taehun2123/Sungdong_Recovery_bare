@@ -1,43 +1,42 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import styles from './AdminUser.module.css';
+import React, { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import styles from './AdminUserList.module.css';
-import axios from '../../../axios';
-import { useUserFilter, useUserSort } from '../../../store/DataStore';
 import AdminUserFilter from './AdminUserFilter';
 import AdminUserSort from './AdminUserSort';
-import { GetCookie } from '../../../customFn/GetCookie';
+import { useModalActions, useModalState, usePageAction, usePageState, useUserFilter, useUserSort } from '../../../store/DataStore';
+import useManagerUser from './customFn/useManageUser';
 import { useFetch } from '../../../customFn/useFetch';
+import UserDetailInfo from './UserDetailInfo';
+import axios from '../../../axios';
 
-export default function AdminUserList() {
+export default function AdminHoldUser() {
 
-  const userFilter = useUserFilter(); // 유저필터 zustand
+  const {
+    fetchServer, // 사용처 : 필터링, 정렬 API
+    fetchGetServer // 사용처 : 유저정보요청 API
+  } = useFetch();
+
+  const { itemsPerPage, currentPage, totalPages } = usePageState();
+
+  const { setItemsPerPage, setCurrentPage, setTotalPages } = usePageAction();
+
+  const { isModal, modalName, selectedIndex } = useModalState()
+  const { selectedModalOpen, setSelectedIndex } = useModalActions();
+
   const queryClient = useQueryClient(); // 리액트 쿼리 클라이언트
-  const userSort = useUserSort(); // 유저정렬 zustand
-  const { fetchServer } = useFetch();
-  const [currentPage, setCurrentPage] = useState(1); // 게시물 데이터와 페이지 번호 상태 관리 
-  const [itemsPerPage, setItemsPerPage] = useState(10); // 아아템 포스팅 개수
-  const [checkedItems, setCheckedItems] = useState([]); // 수정할 데이터의 체크 상태를 관리하는 state(users_id를 담음)
-  const [sortBy, setSortBy] = useState([]); // 정렬 . . . 
-  const [matchedData, setMatchedData] = useState([]); // 서버의 user데이터를 불러올 state
-  // AdminUserList 컴포넌트 내에서 editIndex 상태를 배열이 아닌 단일 값으로 선언합니다.
-  const [editIndex, setEditIndex] = useState(null);
 
-  // handleToggleEdit 함수를 수정하여 editIndex를 배열에서 단일 값으로 업데이트합니다.
-  const handleToggleEdit = (index) => {
-    if (editIndex === index) {
-      setEditIndex(null);
-    } else {
-      setEditIndex(index);
-    }
-  };
-  // 편집 상태 & 입력된 정보 & 체크리스트 초기화
-  const initializingData = () => {
-    if (editIndex !== null) {
-      setEditIndex(null);
-      fetchData();
-      setCheckedItems([]);
-    }
-  }
+  // UserManageFunctions Store :: 고객관리에 필요한 함수 스토어
+  const {
+    editIndex, setEditIndex,
+    checkedItems, setCheckedItems,
+    matchedData, setMatchedData,
+    handleToggleEdit,
+    initializingData,
+    handleAllCheckbox, handlePerCheckbox,
+    updateValue,
+    parseOptionValue
+  } = useManagerUser();
+
   // esc키를 누르면 모달창 닫기.
   useEffect(() => {
     const exit_esc = (event) => {
@@ -53,109 +52,35 @@ export default function AdminUserList() {
     };
   }, [initializingData]);
 
-  // ------------------------------서버 통신------------------------------ //
-  // 유저 데이터 상태 관리
+  // ------------------------------Fetch------------------------------ //
+
+
+
+  // 유저 데이터 Fetch
   const fetchUsersData = async () => {
     try {
-      const token = GetCookie('jwt_token');
-      const response = await axios.get(`/auth/read`, {
-        params: {
-          page: currentPage,
-          pagePosts: itemsPerPage
-        },
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        }
-      });
-      console.log(response.data.message);
-      return response.data.data.data;
+      const data = await fetchGetServer('/auth/read/hold', currentPage);
+      return data.data;
     } catch (error) {
       throw new Error('고객 정보를 불러오는 중 오류가 발생하였습니다.');
     }
   }
   const { isLoading, isError, error, data: userData } = useQuery({
-    queryKey: [`users`, currentPage, itemsPerPage], // currentPage, itemPerPage가 변경될 때마다 재실행하기 위함
+    queryKey: [`holdusers`, currentPage, itemsPerPage], // currentPage, itemPerPage가 변경될 때마다 재실행하기 위함
     queryFn: fetchUsersData,
   });
-  const fetchData = async () => {
-    try {
-      const data = await fetchUsersData();
-      setMatchedData(data);
-    } catch (error) {
-      throw new Error('데이터를 볼러오는 데 실패했습니다.', error);
-    }
-  }
+
   useEffect(() => {
-    fetchData();
-  }, [currentPage, itemsPerPage]);
-
-  //유저 필터링 Fetch
-  /**]
-   * @param {userFilterData} 유저 필터창의 Input된 데이터
-   */
-  const fetchFilteredUserData = async (userFilterData) => {
-    try {
-      const response = await axios.post("/auth/filter",
-        JSON.stringify(
-          userFilterData
-        ),
-        {
-          headers: {
-            "Content-Type": "application/json",
-          }
-        }
-      )
-      // 성공 시 추가된 상품 정보를 반환합니다.
-      return response.data;
-    } catch (error) {
-      // 실패 시 예외를 throw합니다.
-      throw new Error('조건에 일치하는 유저가 없습니다.');
-    }
-  }
-  const { mutate: filterMutation } = useMutation({ mutationFn: fetchFilteredUserData });
-  const onFiltering = () => {
-    filterMutation(userFilter, {
-      onSuccess: (data) => {
-        console.log('user Filtered successfully:', data);
-        alert(data.message);
-        // 다른 로직 수행 또는 상태 업데이트
-        queryClient.setQueryData(['users'], () => {
-          return data.data
-        })
-      },
-      onError: (error) => {
-        console.error('user Filtered failed:', error);
-        // 에러 처리 또는 메시지 표시
-        alert(error.message);
-      },
-    });
-  };
+    if (userData)
+      setMatchedData(userData);
+  }, [userData, itemsPerPage, currentPage]);
 
 
-  // 정렬 
-  const fetchSortedUserData = async (userFilterData) => {
-    fetchServer(userFilterData, `post`, `/auth/sort`, currentPage);
-  };
-  const { mutate: sortMutation } = useMutation({ mutationFn: fetchSortedUserData }); // 정렬
-  const handleSort = () => {
-    sortMutation(userSort, {
-      onSuccess: (data) => {
-        console.log('user Sorted successfully:', data);
-        alert(data.message);
-        // 다른 로직 수행 또는 상태 업데이트
-        queryClient.setQueryData(['users'], () => {
-          return data.data
-        })
-      },
-      onError: (error) => {
-        console.error('user Sorted failed:', error);
-        // 에러 처리 또는 메시지 표시
-        alert(error.message);
-      },
-    });
-  };
+  console.log(userData);
 
+
+
+  // ------------------------고객정보 업데이트 기능 시작------------------------ //
   // 고객 단일 수정
   const handleEdit = async (userData) => { // 
     try {
@@ -191,7 +116,7 @@ export default function AdminUserList() {
   const handleEditSuccess = (data) => { // 수정 성공
     console.log('수정 성공:', data);
     alert('수정이 완료되었습니다.');
-    queryClient.invalidateQueries('userData');
+    queryClient.invalidateQueries('holdusers');
     setEditIndex(null);
   };
   const handleEditError = (error) => { // 수정 실패
@@ -211,8 +136,11 @@ export default function AdminUserList() {
     onSuccess: handleEditSuccess,
     onError: handleEditError,
   });
+  // ------------------------고객정보 업데이트 기능 끝------------------------ //
 
 
+
+  // ------------------------삭제 기능 시작------------------------ //
   // 고객 삭제
   const fetchDeleteUser = async (userID) => { // Fetching
     try {
@@ -236,7 +164,7 @@ export default function AdminUserList() {
   const handleDeleteSuccess = (data) => { // 성공 시
     console.log('user Delete successfully:', data);
     alert(data.message);
-    queryClient.invalidateQueries(['users']);
+    queryClient.invalidateQueries(['holdusers']);
     window.location.reload();
   };
   const handleDeleteError = (error) => { // 실패 시
@@ -248,103 +176,67 @@ export default function AdminUserList() {
     onSuccess: handleDeleteSuccess,
     onError: handleDeleteError,
   });
+  // ------------------------삭제 기능 끝------------------------ //
 
-  // 전체 체크박스 업데이트
-  function handleAllCheckbox(isChecked) {
-    const checked = isChecked;
 
-    if (checked) {
-      // 전체 선택 클릭 시 데이터의 모든 아이템(id)를 담은 배열로 checkItems 상태 업데이트
-      let idArray = matchedData?.map((item) => item.users_id);
-      setCheckedItems(idArray);
-      console.log(checkedItems);
-    } else {
-      // 모두 체킹 해제
-      setCheckedItems([]);
-      console.log(checkedItems);
-    }
+
+  // 필터링 데이터 Fetch
+  const userFilter = useUserFilter();
+  const fetchFilteredHoldUser = async (userFilter) => {
+    console.log(userFilter);
+    return await fetchServer(userFilter, `post`, `/auth/filtering/hold`, currentPage);
   }
-
-  // 체크박스 개별 업데이트
-  function handlePerCheckbox(checked, users_id) {
-    if (checked) {
-      // 단일 선택 시 체크된 아이템을 배열에 추가
-      setCheckedItems(prev => [...prev, users_id]);
-      console.log(checkedItems);
-    } else {
-      // 단일 선택 해제 시 체크된 아이템을 제외한 배열 (필터)
-      setCheckedItems(checkedItems.filter((el) => el !== users_id));
-      console.log(checkedItems);
-    }
-  }
-
-  // 변경사항 업데이트
-  const updateValue = (e, itemKey, itemIndex) => {
-    console.log(checkedItems.length);
-    // 여러 항목 업데이트
-    if (checkedItems.length > 0) {
-      const editData = e.target.value;
-      const updateData = matchedData.map((item) => {
-        // checkedItems에 포함된 사용자의 id와 일치하는 사용자의 데이터만 업데이트
-        if (checkedItems.includes(item.users_id)) {
-          return { ...item, [itemKey]: editData };
-        }
-        return item;
-      });
-      setMatchedData(updateData);
-    }
-    // 단일 항목 업데이트
-    else {
-      const editData = e.target.value;
-      const newData = matchedData.map((item, idx) => {
-        if (idx === itemIndex) {
-          return { ...item, [itemKey]: editData };
-        }
-        return item;
-      });
-      setMatchedData(newData);
-    }
+  const { mutate: filteringMutation } = useMutation({ mutationFn: fetchFilteredHoldUser });
+  const onHoldFiltering = (userFilter) => {
+    console.log(`전달할 때 값: ${userFilter.cor_ceoName}`)
+    filteringMutation(userFilter, {
+      onSuccess: (data) => {
+        console.log('고객 필터링이 성공적으로 완료되었습니다.\n', data.data.data);
+        alert(data.message);
+        setCurrentPage(data.data.currentPage);
+        setTotalPages(data.data.totalPages);
+        queryClient.setQueryData(['holdusers', currentPage, itemsPerPage], () => {
+          return data.data.data;
+        })
+      },
+      onError: (error) => {
+        console.error('필터링에 실패했습니다.\n', error);
+        // 에러 처리 또는 메시지 표시
+        alert(error.message);
+      },
+    });
   };
 
-  const parseOptionValue = (item, listItem) => {
-    if (item.key == 'userType_id') { // 고객구분
-      switch (parseInt(listItem, 10)) {
-        case 1:
-          return <span>실사용자</span>;
-        case 2:
-          return <span>납품업체</span>;
-        case 12:
-          return <span>실사용자 B등급</span>;
-        case 13:
-          return <span>실사용자 C등급</span>;
-        case 14:
-          return <span>실사용자 D등급</span>;
-        case 22:
-          return <span>납품업자 B등급</span>;
-        case 23:
-          return <span>납품업자 C등급</span>;
-        case 24:
-          return <span>납품업자 D등급</span>;
-        case 100:
-          return <span>관리자</span>;
-        default:
-          return <span>Error</span>
 
-      }
-    } else if (item.key == 'hasCMS') { // CMS동의 여부
-      if (listItem)
-        return <span>동의</span>;
-      else
-        return <span>비동의</span>;
-    }
-    return <span>{listItem}</span>;
-  }
 
-  useMemo(() => {
-    // data나 sortBy가 변경될 때마다 정렬
-    // handleSort();
-  }, [userData, sortBy]);
-
+  // 정렬 데이터 Fetch
+  const userSort = useUserSort();
+  const fetchSortedHoldUser = async (userSort) => {
+    // console.log(`선택된 정렬: ${userSort}`);
+    console.log(userSort);
+    return await fetchServer(userSort, `post`, `/auth/sorting/hold`, currentPage);
+  };
+  const { mutate: sortingMutation } = useMutation({ mutationFn: fetchSortedHoldUser }); // 정렬
+  const handleHoldSorting = () => {
+    sortingMutation(userSort, {
+      onSuccess: (data) => {
+        // Debuggig Code : data.data.data
+        console.log('고객 정렬이 성공적으로 완료되었습니다.\n', data.data.data);
+        alert(data.message);
+        setCurrentPage(data.data.currentPage);
+        setTotalPages(data.data.totalPages);
+        // 다른 로직 수행 또는 상태 업데이트
+        queryClient.setQueryData(['holdusers', currentPage, itemsPerPage], () => {
+          return data.data.data
+        })
+      },
+      onError: (error) => {
+        console.error('user Sorted failed:', error);
+        // 에러 처리 또는 메시지 표시
+        alert(error);
+      },
+    });
+  };
 
 
   if (isLoading) {
@@ -355,11 +247,12 @@ export default function AdminUserList() {
     return <div>오류가 발생했습니다.</div>;
   }
 
+
   return (
     <div className={styles.mainContainer}>
       <div className={styles.filtSortContainer}>
-        <AdminUserFilter onFiltering={onFiltering} />
-        <AdminUserSort sortBy={sortBy} onSort={handleSort} />
+        <AdminUserFilter onFiltering={onHoldFiltering} />
+        <AdminUserSort onSort={handleHoldSorting} />
       </div>
       {/* Header */}
       <div className='MediumHeader'>
@@ -385,7 +278,7 @@ export default function AdminUserList() {
             <th>
               <input
                 type='checkbox'
-                checked={checkedItems.length === matchedData.length ? true : false}
+                checked={checkedItems.length === matchedData?.length ? true : false}
                 onChange={(e) => handleAllCheckbox(e.target.checked)}
               />
             </th>
@@ -394,7 +287,7 @@ export default function AdminUserList() {
             {/* 고객 구분, CMS여부 */}
             {[
               { title: '고객 구분', valList: [1, 2, 12, 13, 14, 22, 23, 24, 100], val: userData.userType_id, key: 'userType_id' },
-              { title: '담당자', valList: ['박형조', '엄지석', '김태훈'], val: userData.name, key: 'name' },
+              { title: '담당자', valList: ['엄지석'], val: userData.managerName, key: 'managerName' },
               { title: 'CMS여부', valList: [1, 0], val: userData.hasCMS, key: 'hasCMS' },
             ].map((customItem, index) => (
               <th key={index}>
@@ -409,7 +302,7 @@ export default function AdminUserList() {
                       <option value={null}>선택</option>
                       {customItem.valList.map((valListItem, valListIndex) => (
                         <option key={valListIndex} value={valListItem}>
-                          {parseOptionValue(customItem, valListItem)}
+                          {parseOptionValue(customItem.key, valListItem)}
                         </option>
                       ))}
                     </select>
@@ -419,7 +312,6 @@ export default function AdminUserList() {
                 }
               </th>
             ))}
-
             {/* 주소 */}
             <th>주소</th>
             {/* 연락처 */}
@@ -464,48 +356,43 @@ export default function AdminUserList() {
                   onChange={(e) => handlePerCheckbox(e.target.checked, user.users_id)}
                 />
               </td>
+              {/* 업체명(상호명) : name */}
+              <td onClick={() => {
+                // 수정상태가 활성화되지 않은 상태에서만 모달이 작동하도록 합니다.
+                if (editIndex != index) {
+                  selectedModalOpen('holduser'); // modalName 설정
+                  setSelectedIndex(index); // index 동기화
+                }
+              }}>
+                {user.cor_corName}
+              </td>
               {/* name: 상호명, val: db의 현재 값, valList: 선택할 값 */}
               {[
-                { title: '고객명', val: user.cor_corName, key: 'cor_corName' },
                 { title: '고객 구분', valList: [1, 2, 12, 13, 14, 22, 23, 24, 100], val: user.userType_id, key: 'userType_id' },
-                { title: '담당자', valList: ['박형조', '엄지석', '김태훈'], val: user.name ? user.name : <span style={{ color: 'var(--main-red' }}>배정 필요</span>, key: 'name' },
+                { title: '담당자', valList: ['엄지석'], val: user.managerName && user.managerName || "렌더링 실패", key: 'managerName' },
                 { title: 'CMS여부', valList: [1, 0], val: user.hasCMS, key: 'hasCMS' },
               ].map((customItem, editIdx) => (
                 <td key={editIdx}>
-                  {editIndex === index ?
-                    customItem.valList ?
-                      <select
-                        className='select'
-                        value={customItem.val}
-                        onChange={e => updateValue(e, customItem.key, index)}
-                      >
-                        {customItem.valList.map((item, index) => (
-                          <option key={index} value={item}>{parseOptionValue(customItem, item)}</option>
-                        ))}
-                      </select>
-                      :
-                      <input
-                        className='white_button'
-                        type='text'
-                        value={customItem.val}
-                        onChange={(e) => {
-                          const editData = e.target.value;
-                          const newData = matchedData.map((item, idx) => {
-                            if (idx === index) {
-                              return { ...item, [customItem.key]: editData };
-                            }
-                            return item;
-                          });
-                          setMatchedData(newData);
-                        }}
-                      />
+                  {editIndex === index && customItem.valList ?
+                    <select
+                      className='select'
+                      value={customItem.val}
+                      onChange={e => updateValue(e, customItem.key, index)}
+                    >
+                      <option value={customItem.val}>
+                        {parseOptionValue(customItem.key, customItem.val)}
+                      </option>
+                      {customItem.valList.map((item, index) => (
+                        <option key={index} value={customItem.val}>
+                          {parseOptionValue(customItem.key, item)}
+                        </option>
+                      ))}
+                    </select>
                     :
-                    parseOptionValue(customItem, customItem.val)
+                    parseOptionValue(customItem.key, customItem.val)
                   }
                 </td>
               ))}
-
-
               {/* 주소 */}
               <td>{user.bname} {user.roadAddress}({user.zonecode})</td>
               {/* 연락처 */}
@@ -532,6 +419,13 @@ export default function AdminUserList() {
           ))}
         </tbody>
       </table>
+
+      {/* User Detail Information Modal*/}
+      {isModal && modalName === 'holduser' ?
+        <UserDetailInfo info={matchedData[selectedIndex]} />
+        :
+        null
+      }
     </div >
   );
 }

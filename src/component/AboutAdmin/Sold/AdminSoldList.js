@@ -1,5 +1,5 @@
 import styles from './AdminSoldList.module.css';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import React from 'react';
 import { AdminSoldFilter } from './AdminSoldFilter';
 import { useModalActions, useModalState, useOrderFilter, useOrderSelectList, useOrderSelectListActions } from '../../../store/DataStore';
@@ -10,6 +10,7 @@ import AdminSoldModal from './AdminSoldModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFetch } from '../../../customFn/useFetch';
 import Pagination from '../../../customFn/Pagination';
+import axios from '../../../axios';
 
 export function AdminSoldList() {
 
@@ -27,8 +28,18 @@ export function AdminSoldList() {
   const { selectedModalOpen } = useModalActions(); //모달이름으로 모달을 선택하여 오픈하는 변수
   const orderFilter = useOrderFilter(); // 주문 필터링 구성
   const selectList = useOrderSelectList(); // 선택한 데이터를 담는 변수
-  const { toggleSelectList, toggleAllSelect } = useOrderSelectListActions(); //체크박스 관련 변수
+  const { toggleSelectList, toggleAllSelect, resetSelectList } = useOrderSelectListActions(); //체크박스 관련 변수
 //--------------------------------------------------------------------------------------------------
+
+  /**
+   * 컴포넌트 이동시 체크박스 상태 초기화
+   */
+  useEffect(() => {
+    return () => {
+      resetSelectList();
+      // 컴포넌트가 언마운트될 때 Product 상태 리셋
+    };
+  }, []);
 
   /**
    * @불러오기
@@ -79,6 +90,7 @@ export function AdminSoldList() {
    * - smtMessage : 성동 메세지
    * - userType_id : 유저 구분 번호
    * - users_id : 유저 고유 번호
+   * - corName : 주문 기업명
    */
   const fetchData = async () => {
     const data = await fetchGetAddPostServer(`/order/all`, currentPage, itemsPerPage);
@@ -87,7 +99,7 @@ export function AdminSoldList() {
     return data.data[0];
   }
 
-  const { isLoading, isError, error, data: ordered } = useQuery({
+  const { isLoading, isError, data: ordered } = useQuery({
     queryKey: [`order`, currentPage, itemsPerPage],
     queryFn: () => fetchData()
   }) // currentPage, itemPerPage가 변경될 때마다 재실행하기 위함
@@ -229,6 +241,35 @@ export function AdminSoldList() {
     }
   }
 
+  /**
+   * 엑셀 출력 핸들러
+   */
+  async function handlePrintExcel(){
+    try {
+      // 서버로부터 엑셀 데이터 요청
+      // responseType을 'blob'으로 설정
+      const itemData = await fetchNonPageServer({}, `post`, `/order/all/items`);
+      if(itemData){
+        console.log(itemData);
+        const response = await axios.post('/order/excel', itemData.data.data[0], { responseType: 'blob' });
+        // Blob 데이터로 URL 생성
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        // a 태그를 생성하여 다운로드 링크 설정
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'order.xlsx'); // 다운로드될 파일명 설정
+        document.body.appendChild(link);
+        link.click(); // 프로그래밍적으로 클릭 이벤트 발생
+        // 생성된 URL 해제
+        window.URL.revokeObjectURL(url);
+        // 생성된 a 태그 제거
+        document.body.removeChild(link);
+      }
+  } catch (error) {
+      console.error('Download failed', error);
+  }
+  }   
+
   // 데이터 로딩 중 또는 에러 발생 시 처리
   if (isLoading) {
     return <p>Loading...</p>;
@@ -241,7 +282,7 @@ export function AdminSoldList() {
     <div className={styles.main}>
       <main className={styles.container}>
         <div className={styles.bodyHeader}>
-          <h1>결제완료 주문 및 발송 처리</h1>
+          <h1>미결제 / 결제완료 주문 및 발송 처리</h1>
         </div>
         {/* 필터 */}
         <AdminSoldFilter handleSearch={handleSearch} />
@@ -261,6 +302,7 @@ export function AdminSoldList() {
           </div>
           {/* 발주, 발송, 취소 처리 박스 */}
           <div className={styles.manageBox}>
+            <button onClick={() => handlePrintExcel()} className="original_button">발주서 엑셀 출력</button>
             <button onClick={() => handleDelNumInput()} className={styles.button}>발송처리</button>
             <button onClick={() => handleCancel()} className={styles.button}>취소처리</button>
           </div>
@@ -279,6 +321,8 @@ export function AdminSoldList() {
                 <th>주문상태</th>
                 <th>주문상품</th>
                 <th>주문일자</th>
+                <th>기업명</th>
+                <th>주문자명</th>
                 <th>주문가</th>
                 <th>주문자 정보</th>
               </tr>
@@ -319,12 +363,18 @@ export function AdminSoldList() {
                         } else
                           handleOpenItem(item.order_id);
                       }}>
-                        <h5 style={{ fontSize: '1.1em', fontWeight: '550' }}>
+                        <h5 className={styles.detailView}>
                           {item.product_title} {(item.product_length - 1) > 0 && `외 ${item.product_length - 1}건`}
                         </h5>
                       </td>
                       <td>
                         {new Date(item.order_date).toLocaleString()}
+                      </td>
+                      <td>
+                        {item.corName}
+                      </td>
+                      <td>
+                        {item.order_name}
                       </td>
                       <td style={{ fontWeight: '750' }}>
                         \{parseInt(item.order_payAmount).toLocaleString()}
@@ -338,7 +388,7 @@ export function AdminSoldList() {
                     {/* 아이템 모달 */}
                     {selectedData?.some((selectItem) => selectItem.order_id === item.order_id) && (
                       <tr>
-                        <td colSpan="8">
+                        <td colSpan="10">
                           <table className={styles.colTable}>
                             <thead style={{ backgroundColor: 'white', color: 'black', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.6)' }}>
                               <tr>
@@ -398,7 +448,7 @@ export function AdminSoldList() {
                                         .toLocaleString('ko-KR', { style: 'currency', currency: 'KRW' })}`
                                       : `${parseInt(itemData.product_price).toLocaleString('ko-KR', { style: 'currency', currency: 'KRW' })}`}
                                   </td>
-                                  <td>
+                                  <td style={{ fontWeight: '750' }}>
                                     {itemData.order_cnt}
                                   </td>
                                   <td style={{ fontWeight: '750' }}>
